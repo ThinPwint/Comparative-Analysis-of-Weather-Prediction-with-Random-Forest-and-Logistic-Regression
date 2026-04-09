@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comparative Analysis of Weather Prediction Using Random Forest and Logistic Regression</title>
+    <style>
+        body {
+            background-color: #79dda6; /* pink background*/
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 50px;
+        }
+
+        .logo {
+            width: 100px; /* Logo အရွယ်အစား */
+            height: auto;
+        }
+
+        .university-info h2, .university-info h3 {
+            margin: 5px 0;
+            color: #000;
+        }
+
+        .main-title {
+            margin-top: 100px;
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .info-section {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 100px;
+            padding: 0 100px;
+            text-align: left;
+        }
+
+        .supervised, .presented {
+            font-size: 1.2em;
+        }
+
+        .presented {
+            text-align: center;
+        }
+
+        .start-btn {
+            margin-top: 50px;
+            background-color: #87CEEB;
+            border: 1px solid #000;
+            padding: 10px 40px;
+            font-size: 1.5em;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        .start-btn:hover {
+            background-color: #00BFFF;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header-container">
+        <!-- Logo ပုံတွေရှိရင် static folder ထဲထည့်ပြီး src ပြောင်းပေးပါ -->
+        <img src="../static/logo_left.png" alt="TU Logo" class="logo">
+        
+        <div class="university-info">
+            <h2>Technological University (Meiktila)</h2>
+            <h3>Department of Computer Engineering And Information Technology</h3>
+        </div>
+
+        <img src="../static/logo_right.jpg" alt="IT Logo" class="logo">
+    </div>
+
+    <div class="main-title">
+        Comparative Analysis of Weather Prediction Using Random Forest and Logistic Regression
+    </div>
+
+    <div class="info-section">
+        <div class="supervised">
+            <strong>Supervised by</strong><br>
+            Dr. Pearl Ei Phyu
+        </div>
+        <div class="presented">
+            <strong>Presented by</strong><br>
+            Ma Thin Pwint Nyein Chan (VI-IT-4)
+        </div>
+    </div>
+
+    <a href="{{ url_for('preprocessing') }}" class="start-btn">START</a>
+
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Weather Prediction</title>
+    <style>
+        body { font-family: Arial; background: #f4f4f4; padding: 20px; }
+        .top-container { display: flex; gap: 20px; justify-content: center; }
+        .box { border: 2px solid #555; padding: 20px; width: 420px; border-radius: 10px; background: white; }
+        .box h3 { margin-top: 0; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 5px; text-align: center; }
+        .input-group { margin: 15px 0; display: flex; flex-direction: column; gap: 5px; }
+        
+        .mini-train-btn { background: #28a745; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 3px; font-weight: bold; font-size: 12px; z-index: 2; }
+        .mini-test-btn { background: #007bff; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 3px; font-weight: bold; font-size: 12px; z-index: 2; }
+        
+        /* Layout မရွေ့စေရန် position relative သုံးထားသည် */
+        .row { 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            background: #f9f9f9; 
+            padding: 8px; 
+            border-radius: 5px; 
+            border: 1px dashed #bbb; 
+            position: relative; 
+            overflow: hidden;
+        }
+
+        /* No file chosen ကို ဖျောက်ရန်နှင့် Browse စာသားပေါ်ရန် */
+        input[type="file"] { 
+            width: 85px; 
+            font-size: 11px; 
+            color: transparent; /* "No file chosen" စာသားကို ဖျောက်သည် */
+            position: relative;
+            z-index: 2;
+            cursor: pointer;
+        }
+
+        /* "Browse" လို့ ပေါ်စေရန် Button အစိတ်အပိုင်းကို ပြင်ဆင်ခြင်း */
+        input[type="file"]::-webkit-file-upload-button {
+            visibility: hidden;
+        }
+        
+        input[type="file"]::before {
+            content: 'Browse'; /* ဤနေရာတွင် စာသားကို Browse လို့ ပြောင်းထားသည် */
+            display: inline-block;
+            background: #efefef;
+            border: 1px solid #767676;
+            border-radius: 3px;
+            padding: 3px 10px;
+            outline: none;
+            white-space: nowrap;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 11px;
+            color: black;
+        }
+
+        /* ရွေးထားသော ဖိုင်နာမည်ကို ပြရန် နေရာလွတ် */
+        .file-display-name {
+            position: absolute;
+            left: 85px; /* Browse button ရဲ့ အနောက်မှာ ပေါ်ရန် */
+            font-size: 11px;
+            color: #28a745;
+            font-weight: bold;
+            pointer-events: none; 
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            width: 150px;
+            z-index: 1;
+        }
+
+        .output-area { border: 2px solid #555; height: 250px; margin: 30px auto; width: 860px; background: white; padding: 15px; overflow-y: auto; font-family: monospace; }
+        .button-group { display: flex; justify-content: center; gap: 50px; margin-top: 20px;  }
+        .action-btn { padding: 10px 30px; border: 2px solid #555; background: #88f1ad; cursor: pointer; font-weight: bold; border-radius: 5px; text-decoration: none; color: black; }
+    </style>
+</head>
+<body>
+
+<div class="top-container">
+    <!-- Random Forest Box -->
+    <div class="box">
+        <h3>Random Forest</h3>
+        <form action="/train_only" method="post" enctype="multipart/form-data" class="input-group">
+            <input type="hidden" name="model_type" value="rf">
+            <div class="row">
+                <input type="file" name="train_file" class="file-input" data-target="rf-train-name" required>
+                <span id="rf-train-name" class="file-display-name"></span>
+                <button type="submit" class="mini-train-btn">Train CSV</button>
+            </div>
+        </form>
+
+        <form action="/test_only" method="post" enctype="multipart/form-data" class="input-group">
+            <input type="hidden" name="model_type" value="rf">
+            <div class="row">
+                <input type="file" name="test_file" class="file-input" data-target="rf-test-name" required>
+                <span id="rf-test-name" class="file-display-name"></span>
+                <button type="submit" class="mini-test-btn">Test CSV</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Logistic Regression Box -->
+    <div class="box">
+        <h3>Logistic Regression</h3>
+        <form action="/train_only" method="post" enctype="multipart/form-data" class="input-group">
+            <input type="hidden" name="model_type" value="lr">
+            <div class="row">
+                <input type="file" name="train_file" class="file-input" data-target="lr-train-name" required>
+                <span id="lr-train-name" class="file-display-name"></span>
+                <button type="submit" class="mini-train-btn">Train CSV</button>
+            </div>
+        </form>
+
+        <form action="/test_only" method="post" enctype="multipart/form-data" class="input-group">
+            <input type="hidden" name="model_type" value="lr">
+            <div class="row">
+                <input type="file" name="test_file" class="file-input" data-target="lr-test-name" required>
+                <span id="lr-test-name" class="file-display-name"></span>
+                <button type="submit" class="mini-test-btn">Test CSV</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="output-area">
+    <strong>Result :</strong><hr>
+    <pre>{{ result if result else "System Ready..." }}</pre>
+</div>
+
+<div class="button-group">
+    <a href="/preprocessing" class="action-btn"><< Back</a>
+    <a href="/training" class="action-btn" onclick="localStorage.clear()">Clear Output</a>
+    <a href="/" class="action-btn">Exit >></a>
+</div>
+
+<script>
+    // ဖိုင်ရွေးလိုက်တိုင်း နာမည်သိမ်းရန်နှင့် မျက်နှာပြင်တွင်ပြရန်
+    document.querySelectorAll('.file-input').forEach(input => {
+        input.addEventListener('change', function() {
+            if (this.files && this.files.length > 0) {
+                const fileName = this.files[0].name;
+                const targetId = this.getAttribute('data-target');
+                
+                // UI တွင်ပြရန်
+                document.getElementById(targetId).innerText = fileName;
+                
+                // နောင်တစ်ကြိမ် reload ဖြစ်လျှင်မှတ်မိနေစေရန်
+                localStorage.setItem(targetId, fileName);
+            }
+        });
+    });
+
+    // Page Load ဖြစ်လျှင် သိမ်းထားသော နာမည်များကို ပြန်ထုတ်ပြရန်
+    window.onload = function() {
+        const fileIDs = ['rf-train-name', 'rf-test-name', 'lr-train-name', 'lr-test-name'];
+        fileIDs.forEach(id => {
+            const savedName = localStorage.getItem(id);
+            if (savedName) {
+                document.getElementById(id).innerText = savedName;
+            }
+        });
+    };
+</script>
+
+</body>
+</html>
