@@ -7,23 +7,31 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from imblearn.under_sampling import RandomUnderSampler  # Sampling အတွက် လိုအပ်သည်
+from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 
 app = Flask(__name__)
 app.secret_key = "tu_meiktila_weather_project_secret"
 
-# ၁။ Upload နှင့် Model Folder များ တည်ဆောက်ခြင်း
 UPLOAD_FOLDER = 'uploads'
 MODEL_FOLDER = 'models'
 for folder in [UPLOAD_FOLDER, MODEL_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-MODEL_PATH = os.path.join(MODEL_FOLDER, 'final_model.pkl')
+PIPELINE_PATH = os.path.join(MODEL_FOLDER, 'weather_pipeline.pkl')
 ENCODER_PATH = os.path.join(MODEL_FOLDER, 'encoders.pkl')
+DROPPED_COLS_PATH = os.path.join(MODEL_FOLDER, 'dropped_cols.pkl')
+FEATURE_NAMES_PATH = os.path.join(MODEL_FOLDER, 'feature_names.pkl')
 
-# --- Routes ---
+# 🎯 Target Column နာမည် (CSV ထဲရှိ Target Column နှင့် Auto Match ပြုလုပ်ပေးပါမည်)
+TARGET_COLUMN_NAME = 'Rain'
+
+def clean_column_names(df):
+    """Column နာမည်များတွင် ပါဝင်သော Space များနှင့် Capitalization များကို ရှင်းလင်းပေးသည်"""
+    df.columns = df.columns.str.strip().str.lower()
+    return df
 
 @app.route('/')
 def home():
@@ -35,7 +43,7 @@ def preprocessing():
         df = pd.read_csv(session['data_file'])
         return render_template('preprocessing.html', 
                                tables=[df.head(10).to_html(classes='data')], 
-                               msg="File loaded. Ready for preprocessing.")
+                               msg="File loaded. Duplicates & Missing Values check is ready.")
     return render_template('preprocessing.html', tables=None, msg="Please Upload CSV File")
 
 @app.route('/upload', methods=['POST'])
@@ -61,31 +69,16 @@ def process_data():
     msg = ""
 
     if action == 'missing':
-        # Step 1: Label Encoding for Categorical Columns
+        df = df.drop_duplicates()
         for col in df.columns:
             if df[col].dtype == 'object':
                 le = LabelEncoder()
                 mask = df[col].notnull()
                 df.loc[mask, col] = le.fit_transform(df[col].loc[mask].astype(str))
         
-        # Step 2: Fill Missing Values with Mean
         imputer = SimpleImputer(strategy='mean')
         df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
-        msg = "Missing Values handled with Mean Imputation!"
-
-    elif action == 'scaling':
-        features = df.iloc[:, :-1]
-        target = df.iloc[:, -1]
-        
-        num_cols = features.select_dtypes(include=[np.number]).columns
-        if not num_cols.empty:
-            scaler = StandardScaler()
-            features[num_cols] = scaler.fit_transform(features[num_cols])
-            df = pd.concat([features, target], axis=1)
-            joblib.dump(scaler, os.path.join(MODEL_FOLDER, 'scaler.pkl'))
-            msg = "Standard Scaling applied to Features!"
-        else:
-            msg = "No numeric columns found for scaling."
+        msg = "Duplicates removed and Missing values handled!"
 
     elif action == 'clear':
         if os.path.exists(filepath):
@@ -96,11 +89,18 @@ def process_data():
     df.to_csv(filepath, index=False)
     return render_template('preprocessing.html', tables=[df.head(10).to_html(classes='data')], msg=msg)
 
-@app.route('/save')
-def save_file():
-    if 'data_file' in session and os.path.exists(session['data_file']):
-        return send_file(session['data_file'], as_attachment=True)
-    return "No file to download", 404
+@app.route('/save', methods=['GET'])
+def save_csv():
+    if 'data_file' not in session or not os.path.exists(session['data_file']):
+        return redirect(url_for('preprocessing'))
+    try:
+        return send_file(session['data_file'], mimetype='text/csv', as_attachment=True,
+                         download_name=os.path.basename(session['data_file']))
+    except TypeError:
+        return send_file(session['data_file'], mimetype='text/csv', as_attachment=True,
+                         attachment_filename=os.path.basename(session['data_file']))
+    except Exception as e:
+        return render_template('preprocessing.html', tables=None, msg=f"Save Error: {str(e)}")
 
 @app.route('/training', methods=['GET'])
 def training():
@@ -115,9 +115,22 @@ def train_only():
         return render_template('training.html', result="❌ Error: Please select a CSV file.")
 
     try:
-        df = pd.read_csv(train_file)
-        
-        # Categorical columns များကို Encode လုပ်ပြီး Encoder များကို သိမ်းမည်
+        if train_file.filename.endswith('.xlsx'):
+            df = pd.read_excel(train_file)
+        else:
+            df = pd.read_csv(train_file)
+
+        df = df.drop_duplicates()
+        df = clean_column_names(df)
+
+        target_clean = TARGET_COLUMN_NAME.strip().lower()
+        matched_targets = [c for c in df.columns if target_clean in c]
+        if matched_targets:
+            target_col = matched_targets[0]
+        else:
+            target_col = df.columns[-1]
+
+        # Categorical Encoding
         encoders = {}
         for col in df.columns:
             if df[col].dtype == 'object':
@@ -126,23 +139,71 @@ def train_only():
                 encoders[col] = le
         joblib.dump(encoders, ENCODER_PATH)
 
-        X = df.iloc[:, :-1]
-        y = df.iloc[:, -1].round().astype(int)
+        X = df.drop(columns=[target_col])
+        y = df[target_col].round().astype(int)
 
-        # ၂။ Random Under Sampling အသုံးပြုခြင်း
-        rus = RandomUnderSampler(random_state=42)
-        X_resampled, y_resampled = rus.fit_resample(X, y)
+        # Target Leakage ဖြစ်စေနိုင်သော Precipitation Feature ကို Drop ပြုလုပ်ခြင်း
+        cols_to_drop = [col for col in X.columns if 'precipitation' in col]
+        if cols_to_drop:
+            X = X.drop(columns=cols_to_drop)
+        joblib.dump(cols_to_drop, DROPPED_COLS_PATH)
+        joblib.dump(list(X.columns), FEATURE_NAMES_PATH)
 
-        # ၃။ Model ရွေးချယ်ခြင်း (Max Depth ပါဝင်သည်)
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.15, random_state=42, stratify=y if len(np.unique(y)) > 1 else None
+        )
+
+        # 🌲 Multi-class Weather Prediction အတွက် Optimised ပြုလုပ်ထားသော Random Forest 🌲
         if model_type == 'rf':
-            model = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
+            clf = RandomForestClassifier(
+                n_estimators=300,        # Forest Size ကို တိုးမြှင့်ထားသည်
+                max_depth=10,            # Decision Depth ကို ၁၀ အထိ တိုးမြှင့်၍ Class 3 Pattern ကို ခွဲထုတ်ပေးသည်
+                min_samples_split=2,    
+                min_samples_leaf=1,      
+                max_features='log2',     # Feature Overlapping ပြဿနာကို လျှော့ချပေးသည်
+                class_weight='balanced_subsample', # Minority/Overlapping Class များကို ပိုမို အလေးပေးသည်
+                random_state=42,
+                n_jobs=-1
+            )
         else:
-            model = LogisticRegression(max_iter=1000)
+            clf = LogisticRegression(
+                max_iter=3000, 
+                C=1.0,
+                class_weight='balanced',
+                solver='lbfgs',
+                random_state=42
+            )
 
-        model.fit(X_resampled, y_resampled)
-        joblib.dump(model, MODEL_PATH)
+        pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('model', clf)
+        ])
 
-        return render_template('training.html', result=f"✅ {model_type.upper()} Trained with Random Under Sampling & Max Depth!")
+        pipeline.fit(X_train, y_train)
+        joblib.dump(pipeline, PIPELINE_PATH)
+
+        y_train_pred = pipeline.predict(X_train)
+        train_acc = accuracy_score(y_train, y_train_pred)
+
+        y_val_pred = pipeline.predict(X_val)
+        val_acc = accuracy_score(y_val, y_val_pred)
+
+        feature_info = "\n\n📊 --- Feature Contribution --- \n"
+        trained_model = pipeline.named_steps['model']
+
+        if model_type == 'rf':
+            importances = trained_model.feature_importances_
+            for col, imp in zip(X.columns, importances):
+                feature_info += f"• {col}: {imp*100:.2f}%\n"
+
+        target_msg = f"\n🎯 Identified Target Column: '{target_col}'"
+        dropped_msg = f"\n⚠️ Dropped Feature: {', '.join(cols_to_drop)}" if cols_to_drop else ""
+
+        return render_template('training.html', 
+                               result=f"✅ {model_type.upper()} Model Trained Successfully!\n"
+                                      f"📈 Train Accuracy: {train_acc*100:.2f}%\n"
+                                      f"🎯 Validation Accuracy: {val_acc*100:.2f}%" 
+                                      + target_msg + dropped_msg + feature_info)
 
     except Exception as e:
         return render_template('training.html', result=f"❌ Train Error: {str(e)}")
@@ -151,30 +212,64 @@ def train_only():
 def test_only():
     test_file = request.files.get('test_file')
     
-    if not os.path.exists(MODEL_PATH) or not os.path.exists(ENCODER_PATH):
+    if not os.path.exists(PIPELINE_PATH):
         return render_template('training.html', result="⚠️ Please train the model first!")
 
     if not test_file:
-        return render_template('training.html', result="❌ Error: Please select a Test CSV file.")
+        return render_template('training.html', result="❌ Error: Please select a Test file.")
 
     try:
-        df_test = pd.read_csv(test_file)
-        model = joblib.load(MODEL_PATH)
-        encoders = joblib.load(ENCODER_PATH)
+        if test_file.filename.endswith('.xlsx'):
+            df_test = pd.read_excel(test_file)
+        else:
+            df_test = pd.read_csv(test_file)
 
-        # Test data ကို Train တုန်းက encoder များဖြင့် Encode လုပ်ခြင်း
+        df_test = clean_column_names(df_test)
+
+        pipeline = joblib.load(PIPELINE_PATH)
+        encoders = joblib.load(ENCODER_PATH)
+        cols_to_drop = joblib.load(DROPPED_COLS_PATH) if os.path.exists(DROPPED_COLS_PATH) else []
+        train_features = joblib.load(FEATURE_NAMES_PATH) if os.path.exists(FEATURE_NAMES_PATH) else []
+
+        # Categorical Encoding
         for col, le in encoders.items():
             if col in df_test.columns:
-                # Train တုန်းက မပါခဲ့သော Value အသစ်များအတွက် Error မတက်အောင် -1 ထည့်မည်
                 df_test[col] = df_test[col].map(lambda s: le.transform([str(s)])[0] if str(s) in le.classes_ else -1)
 
-        X_test = df_test.iloc[:, :-1]
-        y_test = df_test.iloc[:, -1].round().astype(int)
-        
-        predictions = model.predict(X_test)
+        target_clean = TARGET_COLUMN_NAME.strip().lower()
+        matched_targets = [c for c in df_test.columns if target_clean in c]
+        if matched_targets:
+            target_col = matched_targets[0]
+        else:
+            target_col = df_test.columns[-1]
+
+        X_test = df_test.drop(columns=[target_col], errors='ignore')
+        y_test = df_test[target_col].round().astype(int)
+
+        if cols_to_drop:
+            X_test = X_test.drop(columns=[c for c in cols_to_drop if c in X_test.columns], errors='ignore')
+
+        # Feature Alignment
+        if train_features:
+            X_test = X_test[train_features]
+
+        # Prediction ပြုလုပ်ခြင်း
+        predictions = pipeline.predict(X_test)
         acc = accuracy_score(y_test, predictions)
-        
-        return render_template('training.html', result=f"🎯 Test Accuracy Score: {acc*100:.2f}%")
+
+        # Prediction Analysis ရလဒ်များ
+        actual_counts = pd.Series(y_test).value_counts().to_dict()
+        pred_counts = pd.Series(predictions).value_counts().to_dict()
+        cm = confusion_matrix(y_test, predictions)
+
+        analysis = (
+            f"\n\n🔍 --- Test Breakdown (31 Rows) --- \n"
+            f"• Actual Labels Count: {actual_counts}\n"
+            f"• Predicted Labels Count: {pred_counts}\n"
+            f"• Confusion Matrix:\n{cm}"
+        )
+
+        return render_template('training.html', result=f"🎯 Test Accuracy Score: {acc*100:.2f}%" + analysis)
 
     except Exception as e:
         return render_template('training.html', result=f"❌ Test Error: {str(e)}")
