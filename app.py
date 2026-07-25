@@ -4,9 +4,9 @@ import numpy as np
 import os
 import joblib
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures, LabelEncoder
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.pipeline import Pipeline
 
@@ -30,8 +30,8 @@ def clean_column_names(df):
     df.columns = df.columns.str.strip().str.lower()
     return df
 
-def get_pipeline_path(model_type):
-    return os.path.join(MODEL_FOLDER, f'weather_pipeline_{model_type}.pkl')
+def get_pipeline_path(model_type_key):
+    return os.path.join(MODEL_FOLDER, f'weather_pipeline_{model_type_key}.pkl')
 
 @app.route('/')
 def home():
@@ -108,11 +108,19 @@ def training():
 
 @app.route('/train_only', methods=['POST'])
 def train_only():
-    model_type = request.form.get('model_type', 'rf')
+    raw_model_type = request.form.get('model_type', 'lr').lower().strip()
     train_file = request.files.get('train_file') 
 
+    # Dynamic Model Detection
+    if 'rf' in raw_model_type or 'random' in raw_model_type:
+        model_key = 'rf'
+        model_name = "RANDOM FOREST"
+    else:
+        model_key = 'lr'
+        model_name = "LOGISTIC REGRESSION"
+
     if not train_file:
-        return render_template('training.html', result="❌ Error: Please select a CSV file.")
+        return render_template('training.html', result=f"❌ Error: Please select a CSV file to train {model_name}.")
 
     try:
         if train_file.filename.endswith('.xlsx'):
@@ -130,7 +138,7 @@ def train_only():
         else:
             target_col = df.columns[-1]
 
-        # Categorical Encoders
+        # Categorical Encoding
         encoders = {}
         for col in df.columns:
             if df[col].dtype == 'object':
@@ -149,70 +157,68 @@ def train_only():
         joblib.dump(cols_to_drop, DROPPED_COLS_PATH)
         joblib.dump(list(X.columns), FEATURE_NAMES_PATH)
 
-        # 🌲 Ultra-Optimized Weather Classifier 🌲
-        if model_type == 'rf':
-            clf = RandomForestClassifier(
-                n_estimators=300,
-                max_depth=8,
-                min_samples_split=3,
-                min_samples_leaf=1,
-                max_features=None,
-                random_state=42,
-                n_jobs=-1
-            )
+        # ⚡ MODEL PIPELINE BUILDING ⚡
+        if model_key == 'rf':
+            pipeline = Pipeline([
+                ('scaler', StandardScaler()),
+                ('model', RandomForestClassifier(
+                    n_estimators=300, 
+                    max_depth=10, 
+                    random_state=42, 
+                    n_jobs=-1
+                ))
+            ])
         else:
-            clf = LogisticRegression(
-                max_iter=3000, 
-                C=1.0,
-                class_weight='balanced',
-                solver='lbfgs',
-                random_state=42
-            )
+            pipeline = Pipeline([
+                ('scaler', StandardScaler()),
+                ('poly', PolynomialFeatures(degree=2, include_bias=False)),
+                ('model', LogisticRegression(
+                    C=10.0,
+                    solver='lbfgs',
+                    multi_class='multinomial',
+                    class_weight='balanced',
+                    max_iter=5000,
+                    random_state=42
+                ))
+            ])
 
-        pipeline = Pipeline([
-            ('scaler', StandardScaler()),
-            ('model', clf)
-        ])
-
-        # Full Dataset ဖြင့် သင်ယူစေခြင်းဖြင့် တိကျမှုကို ၁၀၀% ရယူမည်
         pipeline.fit(X, y)
         
-        pipeline_path = get_pipeline_path(model_type)
+        pipeline_path = get_pipeline_path(model_key)
         joblib.dump(pipeline, pipeline_path)
 
         y_train_pred = pipeline.predict(X)
         train_acc = accuracy_score(y, y_train_pred)
 
-        feature_info = "\n\n📊 --- Feature Contribution --- \n"
-        trained_model = pipeline.named_steps['model']
-
-        if model_type == 'rf':
-            importances = trained_model.feature_importances_
-            for col, imp in zip(X.columns, importances):
-                feature_info += f"• {col}: {imp*100:.2f}%\n"
-
         target_msg = f"\n🎯 Identified Target Column: '{target_col}'"
         dropped_msg = f"\n⚠️ Dropped Feature: {', '.join(cols_to_drop)}" if cols_to_drop else ""
 
         return render_template('training.html', 
-                               result=f"✅ {model_type.upper()} Model Trained Successfully!\n"
+                               result=f"✅ {model_name} Trained Successfully!\n"
                                       f"📈 Train Accuracy: {train_acc*100:.2f}%" 
-                                      + target_msg + dropped_msg + feature_info)
+                                      + target_msg + dropped_msg)
 
     except Exception as e:
-        return render_template('training.html', result=f"❌ Train Error: {str(e)}")
+        return render_template('training.html', result=f"❌ Train Error ({model_name}): {str(e)}")
 
 @app.route('/test_only', methods=['POST'])
 def test_only():
-    model_type = request.form.get('model_type', 'rf')
+    raw_model_type = request.form.get('model_type', 'lr').lower().strip()
     test_file = request.files.get('test_file')
+
+    if 'rf' in raw_model_type or 'random' in raw_model_type:
+        model_key = 'rf'
+        model_name = "RANDOM FOREST"
+    else:
+        model_key = 'lr'
+        model_name = "LOGISTIC REGRESSION"
     
-    pipeline_path = get_pipeline_path(model_type)
+    pipeline_path = get_pipeline_path(model_key)
     if not os.path.exists(pipeline_path):
-        return render_template('training.html', result=f"⚠️ Please train the {model_type.upper()} model first!")
+        return render_template('training.html', result=f"⚠️ Please train the {model_name} model first!")
 
     if not test_file:
-        return render_template('training.html', result="❌ Error: Please select a Test file.")
+        return render_template('training.html', result=f"❌ Error: Please select a Test file for {model_name}.")
 
     try:
         if test_file.filename.endswith('.xlsx'):
@@ -254,20 +260,20 @@ def test_only():
         pred_counts = pd.Series(predictions).value_counts().to_dict()
         cm = confusion_matrix(y_test, predictions)
 
-        status_msg = "✅ Excellent Performance (>80%)" if acc >= 0.80 else "⚠️ Test Evaluation Complete"
+        status_msg = f"✅ Excellent {model_name} Performance (>80%)" if acc >= 0.80 else "⚠️ Test Evaluation Complete"
 
         analysis = (
-            f"\n\n🔍 --- {model_type.upper()} Test Breakdown ({len(y_test)} Rows) --- \n"
+            f"\n\n🔍 --- {model_name} Breakdown ({len(y_test)} Rows) --- \n"
             f"• {status_msg}\n"
             f"• Actual Labels Count: {actual_counts}\n"
             f"• Predicted Labels Count: {pred_counts}\n"
             f"• Confusion Matrix:\n{cm}"
         )
 
-        return render_template('training.html', result=f"🎯 Test Accuracy Score ({model_type.upper()}): {acc*100:.2f}%" + analysis)
+        return render_template('training.html', result=f"🎯 Test Accuracy Score ({model_name}): {acc*100:.2f}%" + analysis)
 
     except Exception as e:
-        return render_template('training.html', result=f"❌ Test Error: {str(e)}")
+        return render_template('training.html', result=f"❌ Test Error ({model_name}): {str(e)}")
 
 if __name__ == '__main__':
     app.run(debug=True)
