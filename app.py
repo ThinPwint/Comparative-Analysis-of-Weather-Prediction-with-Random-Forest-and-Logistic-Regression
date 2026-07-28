@@ -7,7 +7,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
 app = Flask(__name__)
@@ -25,6 +25,14 @@ MODEL_PATH = os.path.join(MODEL_FOLDER, 'final_model.pkl')
 ENCODER_PATH = os.path.join(MODEL_FOLDER, 'encoders.pkl')
 SCALER_PATH = os.path.join(MODEL_FOLDER, 'scaler.pkl')
 IMPUTER_PATH = os.path.join(MODEL_FOLDER, 'imputer.pkl')
+
+# Fake Noise Features များ ထည့်သွင်းပေးသည့် Helper Function
+def add_fake_features(df_features, num_noise=20):
+    np.random.seed(42)
+    df_copy = df_features.copy()
+    for i in range(1, num_noise + 1):
+        df_copy[f'fake_noise_{i}'] = np.random.uniform(-100, 100, len(df_copy))
+    return df_copy
 
 # ---------------------------------------------------------
 # Routes (လမ်းကြောင်းများ)
@@ -115,7 +123,7 @@ def training():
     return render_template('training.html')
 
 # ---------------------------------------------------------
-# Model Training (70/30 Split + Keep All Columns)
+# Model Training (70/30 Split + Fake Features)
 # ---------------------------------------------------------
 @app.route('/train_only', methods=['POST'])
 def train_only():
@@ -128,11 +136,14 @@ def train_only():
     try:
         df = pd.read_csv(train_file)
         
-        # Column များကို Drop မလုပ်ဘဲ Feature အားလုံးကို သိမ်းဆည်းခြင်း
+        # ၁။ Features နှင့် Target ကို ခွဲထုတ်ခြင်း
         X = df.iloc[:, :-1]
         y = df.iloc[:, -1]
 
-        # Label Encoding
+        # ၂။ Fake Noise Features (၅) ခု ထည့်သွင်းပေးခြင်း
+        X = add_fake_features(X, num_noise=20)
+
+        # Label Encoding ပြုလုပ်ခြင်း
         encoders = {}
         for col in X.columns:
             if X[col].dtype == 'object':
@@ -147,12 +158,12 @@ def train_only():
         else:
             y = y.round().astype(int)
 
-        # Data ကို 70% Train နှင့် 30% Validation အဖြစ် ခွဲခြားခြင်း (test_size=0.3)
+        # ၃။ Data ကို 70% Train နှင့် 30% Validation ခွဲခြားခြင်း
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=0.3, random_state=42, stratify=y
         )
 
-        # Imputation နှင့် Scaling များကို 70% Train Data ပေါ်တွင်သာ Fit ပြုလုပ်ခြင်း
+        # Imputation နှင့် Scaling များကို Train Data ပေါ်တွင်သာ Fit ပြုလုပ်ခြင်း
         num_cols = X_train.select_dtypes(include=[np.number]).columns
         if not num_cols.empty:
             imputer = SimpleImputer(strategy='median')
@@ -165,31 +176,32 @@ def train_only():
             X_val[num_cols] = scaler.transform(X_val[num_cols])
             joblib.dump(scaler, SCALER_PATH)
 
-        # Model ကို Train ပြုလုပ်ခြင်း (Overfitting ကာကွယ်ရန် တင်းကြပ်သော Hyperparameters သုံးထားသည်)
+        # ၄။ Model Train ပြုလုပ်ခြင်း
         if model_type == 'rf':
             model = RandomForestClassifier(
-                n_estimators=30,           # အပင် အရေအတွက် နည်းဆင်းထားသည်
-                max_depth=3,               # Depth ကို 3 အထိ လျှော့ထားသဖြင့် Overfit မဖြစ်စေပါ
-                min_samples_split=20,      # Node တစ်ခု ခွဲရန် Sample ၂၀ လိုအပ်သည်
-                min_samples_leaf=15,       # Leaf Node တိုင်းတွင် အနည်းဆုံး Sample ၁၅ ခု ရှိစေသည်
-                max_features='sqrt',       # Feature များကို တစ်စိတ်တစ်ပိုင်းသာ ရွေးချယ်ခွင့်ပြုသည်
-                max_samples=0.5,           # Data ၏ 50% သာ Random မဲနှိုက်၍ အပင်ဆောက်သည်
-                class_weight='balanced',
-                random_state=42
+                criterion='gini',
+                n_estimators=500,
+                max_depth=2,
+                max_features=2,
+                random_state=42,
+                max_leaf_nodes=5,
+                class_weight='balanced'
             )
         else:
-            model = LogisticRegression(max_iter=1000, C=0.1, class_weight='balanced') # C=0.1 ဖြင့် Regularization တင်းကြပ်ထားသည်
+            model = LogisticRegression(max_iter=1000, C=0.05, random_state=42)
 
         model.fit(X_train, y_train)
         joblib.dump(model, MODEL_PATH)
 
-        # 30% Validation Data ဖြင့် Accuracy စစ်ဆေးခြင်း
+        # ၅။ 30% Validation Data ဖြင့် Accuracy & Classification Report စစ်ဆေးခြင်း
         val_preds = model.predict(X_val)
         val_acc = accuracy_score(y_val, val_preds)
+        val_report = classification_report(y_val, val_preds)
 
         return render_template(
             'training.html', 
-            result=f"✅ {model_type.upper()} Model လေ့ကျင့်ပြီးပါပြီ! (Validation Accuracy: {val_acc * 100:.2f}%)"
+            result=f"✅ {model_type.upper()} Model လေ့ကျင့်ပြီးပါပြီ! (Validation Accuracy: {val_acc * 100:.2f}%)",
+            report=val_report
         )
 
     except Exception as e:
@@ -215,6 +227,9 @@ def test_only():
 
         X_test = df_test.iloc[:, :-1]
         y_test = df_test.iloc[:, -1]
+
+        # Test Data တွင်လည်း Same Fake Noise Features ထည့်သွင်းပေးခြင်း
+        X_test = add_fake_features(X_test, num_noise=20)
 
         for col, le in encoders.items():
             if col in X_test.columns:
@@ -242,8 +257,13 @@ def test_only():
 
         predictions = model.predict(X_test)
         acc = accuracy_score(y_test, predictions)
+        test_report = classification_report(y_test, predictions)
         
-        return render_template('training.html', result=f"🎯 Test Accuracy Score: {acc * 100:.2f}%")
+        return render_template(
+            'training.html', 
+            result=f"🎯 Test Accuracy Score: {acc * 100:.2f}%",
+            report=test_report
+        )
 
     except Exception as e:
         return render_template('training.html', result=f"❌ Test Error: {str(e)}")

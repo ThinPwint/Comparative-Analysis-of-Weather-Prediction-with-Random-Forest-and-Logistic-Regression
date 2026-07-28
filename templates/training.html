@@ -124,8 +124,19 @@
 </div>
 
 <div class="output-area">
-    <strong>Result :</strong><hr>
-    <pre>{{ result if result else "System Ready..." }}</pre>
+    <!-- Result Message -->
+{% if result %}
+    <h4>{{ result }}</h4>
+{% endif %}
+
+<!-- Classification Report Display -->
+{% if report %}
+    <hr>
+    <h3>📊 Classification Report:</h3>
+    <pre style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 14px; border: 1px solid #ddd;">
+{{ report }}
+    </pre>
+{% endif %}
 </div>
 
 <div class="button-group">
