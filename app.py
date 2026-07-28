@@ -73,34 +73,16 @@ def process_data():
     action = request.form.get('action')
     msg = ""
 
-    # Missing Values ဖြည့်သွင်းခြင်း
-    if action == 'missing':
-        num_cols = df.select_dtypes(include=[np.number]).columns
-        cat_cols = df.select_dtypes(include=['object', 'category']).columns
-
-        if not num_cols.empty:
-            num_imputer = SimpleImputer(strategy='median')
-            df[num_cols] = num_imputer.fit_transform(df[num_cols])
-            
-        if not cat_cols.empty:
-            cat_imputer = SimpleImputer(strategy='most_frequent')
-            df[cat_cols] = cat_imputer.fit_transform(df[cat_cols])
-
-        msg = "Missing Values များကို အောင်မြင်စွာ ဖြည့်စွက်ပြီးပါပြီ!"
-
-    # Standard Scaling ပြုလုပ်ခြင်း
-    elif action == 'scaling':
-        features = df.iloc[:, :-1]
-        target = df.iloc[:, -1]
+    # Preprocessing အဆင့်တွင် Label Encoding တစ်ခုတည်းသာ လုပ်ဆောင်ခြင်း
+    if action == 'preprocessing':
+        encoders = {}
+        for col in df.columns:
+            if df[col].dtype == 'object' or df[col].dtype == 'category':
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col].astype(str))
+                encoders[col] = le
         
-        num_cols = features.select_dtypes(include=[np.number]).columns
-        if not num_cols.empty:
-            scaler = StandardScaler()
-            features[num_cols] = scaler.fit_transform(features[num_cols])
-            df = pd.concat([features, target], axis=1)
-            msg = "Features များကို Standard Scaling ပြုလုပ်ပြီးပါပြီ!"
-        else:
-            msg = "Scaling ပြုလုပ်ရန် Numeric Column မတွေ့ရှိပါ။"
+        msg = "Data Preprocessing (Label Encoding) အောင်မြင်စွာ ပြုလုပ်ပြီးပါပြီ!"
 
     # Session နှင့် ဖိုင်ရှင်းလင်းခြင်း
     elif action == 'clear':
@@ -140,23 +122,23 @@ def train_only():
         X = df.iloc[:, :-1]
         y = df.iloc[:, -1]
 
-        # ၂။ Fake Noise Features (၅) ခု ထည့်သွင်းပေးခြင်း
+        # ၂။ Fake Noise Features (၂၀) ခု ထည့်သွင်းပေးခြင်း
         X = add_fake_features(X, num_noise=20)
 
-        # Label Encoding ပြုလုပ်ခြင်း
-        encoders = {}
-        for col in X.columns:
-            if X[col].dtype == 'object':
-                le = LabelEncoder()
-                X[col] = le.fit_transform(X[col].astype(str))
-                encoders[col] = le
-        joblib.dump(encoders, ENCODER_PATH)
+        # # Label Encoding ပြုလုပ်ခြင်း
+        # encoders = {}
+        # for col in X.columns:
+        #     if X[col].dtype == 'object':
+        #         le = LabelEncoder()
+        #         X[col] = le.fit_transform(X[col].astype(str))
+        #         encoders[col] = le
+        # joblib.dump(encoders, ENCODER_PATH)
 
-        if y.dtype == 'object':
-            target_le = LabelEncoder()
-            y = target_le.fit_transform(y.astype(str))
-        else:
-            y = y.round().astype(int)
+        # if y.dtype == 'object':
+        #     target_le = LabelEncoder()
+        #     y = target_le.fit_transform(y.astype(str))
+        # else:
+        #     y = y.round().astype(int)
 
         # ၃။ Data ကို 70% Train နှင့် 30% Validation ခွဲခြားခြင်း
         X_train, X_val, y_train, y_val = train_test_split(

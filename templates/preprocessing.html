@@ -1,39 +1,105 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Weather Prediction</title>
+    <title>Weather Prediction - Preprocessing</title>
     <style>
-        body { display: flex; height: 100vh; margin: 0; font-family: Arial; background: #eef2f3; }
-        .sidebar { width: 260px; background: white; padding: 25px; border-right: 1px solid #ccc; display: flex; flex-direction: column; gap: 15px; }
-        .main { flex-grow: 1; padding: 40px; position: relative; }
-        .btn { background: #88f1ad; border: 1px solid #99b; padding: 12px; font-weight: bold; cursor: pointer; border-radius: 5px; width: 100%; text-decoration: none; text-align: center; color: black; display: block; }
-        .btn:hover { background: #92c5d6; }
-        .display-box { background: white; border: 1px solid #aaa; height: 70%; overflow: auto; padding: 15px; border-radius: 5px; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th, td { border: 1px solid #ddd; padding: 8px; }
+        body { 
+            display: flex; 
+            height: 100vh; 
+            margin: 0; 
+            font-family: Arial, sans-serif; 
+            background: #eef2f3; 
+        }
+        .sidebar { 
+            width: 260px; 
+            background: white; 
+            padding: 25px; 
+            border-right: 1px solid #ccc; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+        }
+        .main { 
+            flex-grow: 1; 
+            padding: 40px; 
+            position: relative; 
+        }
+        .btn { 
+            background: #88f1ad; 
+            border: 1px solid #72db96; 
+            padding: 12px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 5px; 
+            width: 100%; 
+            text-decoration: none; 
+            text-align: center; 
+            color: black; 
+            display: block; 
+            box-sizing: border-box;
+            transition: background 0.2s;
+        }
+        .btn:hover { 
+            background: #72db96; 
+        }
+        .btn-danger {
+            background: #ff9999;
+            border-color: #ff7777;
+        }
+        .btn-danger:hover {
+            background: #ff7777;
+        }
+        .display-box { 
+            background: white; 
+            border: 1px solid #aaa; 
+            height: 70%; 
+            overflow: auto; 
+            padding: 15px; 
+            border-radius: 5px; 
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.05);
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            font-size: 13px; 
+        }
+        th, td { 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
     </style>
 </head>
 <body>
-   
 
 <div class="sidebar">
+    <!-- CSV Upload ပြုလုပ်ရန် -->
     <form action="/upload" method="post" enctype="multipart/form-data">
         <input type="file" name="file" id="csv_file" hidden onchange="this.form.submit()">
         <button type="button" class="btn" onclick="document.getElementById('csv_file').click()">Load CSV</button>
     </form>
 
+    <!-- Label Encoding အဓိကလုပ်ဆောင်မည့် Preprocessing အဆင့် -->
     <form action="/process" method="post" style="display: flex; flex-direction: column; gap: 15px;">
-        <button type="submit" name="action" value="missing" class="btn">Missing Value</button>
-        <button type="submit" name="action" value="scaling" class="btn">Feature Scaling</button>
-        <button type="submit" name="action" value="clear" class="btn">Clear</button>
+        <button type="submit" name="action" value="preprocessing" class="btn">Preprocessing</button>
+       
     </form>
 
-   <!-- Save CSV (Form နှင့် ရေးထားပုံ) -->
+    <!-- Save CSV -->
     <form action="/save" method="get">
         <button type="submit" class="btn">Save as CSV</button>
     </form>
+     <form action="/process" method="post" style="display: flex; flex-direction: column; gap: 15px;">
+        
+        <button type="submit" name="action" value="clear" class="btn btn-danger">Clear</button>
+    </form>
+
     <div style="margin-top: auto;">
-        <a href="/" class="btn" style="background: #88f1ad;"><< Home</a>
+        <a href="/" class="btn" style="background: #a8d5e2; border-color: #92c5d6;"><< Home</a>
     </div>
 </div>
 
@@ -45,7 +111,7 @@
                 {{ table|safe }}
             {% endfor %}
         {% else %}
-            <p>Waiting for data...</p>
+            <p style="color: #666; font-style: italic;">Waiting for data...</p>
         {% endif %}
     </div>
     
