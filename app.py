@@ -23,6 +23,7 @@ for folder in [UPLOAD_FOLDER, MODEL_FOLDER]:
 
 MODEL_PATH = os.path.join(MODEL_FOLDER, 'final_model.pkl')
 ENCODER_PATH = os.path.join(MODEL_FOLDER, 'encoders.pkl')
+TARGET_ENCODER_PATH = os.path.join(MODEL_FOLDER, 'target_encoder.pkl')
 SCALER_PATH = os.path.join(MODEL_FOLDER, 'scaler.pkl')
 IMPUTER_PATH = os.path.join(MODEL_FOLDER, 'imputer.pkl')
 
@@ -63,6 +64,9 @@ def upload_file():
         return redirect(url_for('preprocessing'))
     return "မမှန်ကန်သော ဖိုင်အမျိုးအစားဖြစ်သည်", 400
 
+# ---------------------------------------------------------
+# Preprocessing အဆင့်တွင် Target Encoder ပါ တစ်ခါတည်း သိမ်းဆည်းခြင်း
+# ---------------------------------------------------------
 @app.route('/process', methods=['POST'])
 def process_data():
     if 'data_file' not in session:
@@ -73,18 +77,26 @@ def process_data():
     action = request.form.get('action')
     msg = ""
 
-    # Preprocessing အဆင့်တွင် Label Encoding တစ်ခုတည်းသာ လုပ်ဆောင်ခြင်း
     if action == 'preprocessing':
         encoders = {}
-        for col in df.columns:
+        target_col = df.columns[-1]  # နောက်ဆုံး Column ကို Target ဟု သတ်မှတ်သည်
+
+        # ၁။ Target Column ကို LabelEncode လုပ်ပြီး သီးသန့် Save လုပ်မည်
+        if df[target_col].dtype == 'object' or df[target_col].dtype == 'category':
+            target_le = LabelEncoder()
+            df[target_col] = target_le.fit_transform(df[target_col].astype(str))
+            joblib.dump(target_le, TARGET_ENCODER_PATH)
+
+        # ၂။ ကျန်တဲ့ Feature Columns များကို Encode လုပ်မည်
+        for col in df.columns[:-1]:
             if df[col].dtype == 'object' or df[col].dtype == 'category':
                 le = LabelEncoder()
                 df[col] = le.fit_transform(df[col].astype(str))
                 encoders[col] = le
         
-        msg = "Data Preprocessing (Label Encoding) အောင်မြင်စွာ ပြုလုပ်ပြီးပါပြီ!"
+        joblib.dump(encoders, ENCODER_PATH)
+        msg = "Data Preprocessing (Label Encoding) အောင်မြင်စွာ ပြုလုပ်ပြီး Target Encoder ပါ သိမ်းဆည်းပြီးပါပြီ!"
 
-    # Session နှင့် ဖိုင်ရှင်းလင်းခြင်း
     elif action == 'clear':
         if os.path.exists(filepath):
             os.remove(filepath)
@@ -105,7 +117,7 @@ def training():
     return render_template('training.html')
 
 # ---------------------------------------------------------
-# Model Training (70/30 Split + Fake Features)
+# Model Training (Preprocessed Data ဖြင့် Train ခြင်း)
 # ---------------------------------------------------------
 @app.route('/train_only', methods=['POST'])
 def train_only():
@@ -118,34 +130,28 @@ def train_only():
     try:
         df = pd.read_csv(train_file)
         
-        # ၁။ Features နှင့် Target ကို ခွဲထုတ်ခြင်း
-        X = df.iloc[:, :-1]
-        y = df.iloc[:, -1]
+        # ၁။ Features နှင့် Target ခွဲထုတ်ခြင်း (Data များသည် Encode လုပ်ပြီးသား ဂဏန်းများဖြစ်သည်)
+        X = df.iloc[:, :-1].copy()
+        y = df.iloc[:, -1].copy().astype(int)
 
-        # ၂။ Fake Noise Features (၂၀) ခု ထည့်သွင်းပေးခြင်း
+        # 🎯 Target Name များကို ရှာဖွေခြင်း
+        # Preprocessing တုန်းက သိမ်းခဲ့သော Target Encoder ရှိလျှင် Original Class Names ကိုယူမည်
+        target_names = None
+        if os.path.exists(TARGET_ENCODER_PATH):
+            target_le = joblib.load(TARGET_ENCODER_PATH)
+            target_names = target_le.classes_.astype(str).tolist()
+        else:
+            # တကယ်လို့ target_encoder.pkl မရှိရင် ဂဏန်းအတိုင်းပဲ ပြမည်
+            target_names = [str(c) for c in np.unique(y)]
+
+        # ၂။ Fake Noise Features (၂၀) ခု ထည့်သွင်းခြင်း
         X = add_fake_features(X, num_noise=20)
 
-        # # Label Encoding ပြုလုပ်ခြင်း
-        # encoders = {}
-        # for col in X.columns:
-        #     if X[col].dtype == 'object':
-        #         le = LabelEncoder()
-        #         X[col] = le.fit_transform(X[col].astype(str))
-        #         encoders[col] = le
-        # joblib.dump(encoders, ENCODER_PATH)
-
-        # if y.dtype == 'object':
-        #     target_le = LabelEncoder()
-        #     y = target_le.fit_transform(y.astype(str))
-        # else:
-        #     y = y.round().astype(int)
-
-        # ၃။ Data ကို 70% Train နှင့် 30% Validation ခွဲခြားခြင်း
+        # ၃။ Data Split (70% Train, 30% Validation)
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=0.3, random_state=42, stratify=y
         )
 
-        # Imputation နှင့် Scaling များကို Train Data ပေါ်တွင်သာ Fit ပြုလုပ်ခြင်း
         num_cols = X_train.select_dtypes(include=[np.number]).columns
         if not num_cols.empty:
             imputer = SimpleImputer(strategy='median')
@@ -175,10 +181,13 @@ def train_only():
         model.fit(X_train, y_train)
         joblib.dump(model, MODEL_PATH)
 
-        # ၅။ 30% Validation Data ဖြင့် Accuracy & Classification Report စစ်ဆေးခြင်း
+        # ၅။ Validation Evaluation & Classification Report
         val_preds = model.predict(X_val)
         val_acc = accuracy_score(y_val, val_preds)
-        val_report = classification_report(y_val, val_preds)
+
+        # Target Class Names ဖြင့် Report ထုတ်ပေးခြင်း
+        labels = list(range(len(target_names)))
+        val_report = classification_report(y_val, val_preds, labels=labels, target_names=target_names)
 
         return render_template(
             'training.html', 
@@ -190,13 +199,16 @@ def train_only():
         return render_template('training.html', result=f"❌ Train Error: {str(e)}")
 
 # ---------------------------------------------------------
-# Test File ဖြင့် စမ်းသပ်ခြင်း (Test Only)
+# Test File ဖြင့် စမ်းသပ်ခြင်း
+# ---------------------------------------------------------
+# ---------------------------------------------------------
+# Test File ဖြင့် စမ်းသပ်ခြင်း (Actual vs Predicted Table ဖြင့်)
 # ---------------------------------------------------------
 @app.route('/test_only', methods=['POST'])
 def test_only():
     test_file = request.files.get('test_file')
     
-    if not os.path.exists(MODEL_PATH) or not os.path.exists(ENCODER_PATH):
+    if not os.path.exists(MODEL_PATH):
         return render_template('training.html', result="⚠️ ကျေးဇူးပြု၍ ပထမဦးစွာ Model ကို Train ပြုလုပ်ပါ။")
 
     if not test_file:
@@ -205,46 +217,87 @@ def test_only():
     try:
         df_test = pd.read_csv(test_file)
         model = joblib.load(MODEL_PATH)
-        encoders = joblib.load(ENCODER_PATH)
 
-        X_test = df_test.iloc[:, :-1]
-        y_test = df_test.iloc[:, -1]
+        X_test = df_test.iloc[:, :-1].copy()
+        y_test_orig = df_test.iloc[:, -1].copy() # Original Actual y values
 
-        # Test Data တွင်လည်း Same Fake Noise Features ထည့်သွင်းပေးခြင်း
+        # 🎯 Target Class Names များကို ရယူခြင်း
+        target_names = None
+        if os.path.exists(TARGET_ENCODER_PATH):
+            target_le = joblib.load(TARGET_ENCODER_PATH)
+            target_names = target_le.classes_.astype(str).tolist()
+            
+            # y_test သည် String ဖြစ်နေပါက Numeric ပြောင်းမည်
+            if y_test_orig.dtype == 'object' or y_test_orig.dtype == 'category':
+                known_classes = set(target_le.classes_)
+                y_test = y_test_orig.astype(str).map(
+                    lambda val: target_le.transform([val])[0] if val in known_classes else -1
+                )
+            else:
+                y_test = y_test_orig.astype(int)
+        else:
+            target_names = [str(c) for c in np.unique(y_test_orig)]
+            y_test = y_test_orig.astype(int)
+
+        y_test = np.array(y_test, dtype=int)
+
+        # Feature Encoders ရှိလျှင် ပြန်သုံးမည်
+        if os.path.exists(ENCODER_PATH):
+            encoders = joblib.load(ENCODER_PATH)
+            for col in X_test.columns:
+                if col in encoders and (X_test[col].dtype == 'object' or X_test[col].dtype == 'category'):
+                    le = encoders[col]
+                    X_test[col] = X_test[col].astype(str).map(
+                        lambda val: le.transform([val])[0] if val in le.classes_ else -1
+                    )
+
+        # Fake Noise + Imputer + Scaler
         X_test = add_fake_features(X_test, num_noise=20)
 
-        for col, le in encoders.items():
-            if col in X_test.columns:
-                known_classes = set(le.classes_)
-                X_test[col] = X_test[col].astype(str).map(
-                    lambda val: le.transform([val])[0] if val in known_classes else -1
-                )
-
-        if y_test.dtype == 'object':
-            y_test = LabelEncoder().fit_transform(y_test.astype(str))
-        else:
-            y_test = y_test.round().astype(int)
-
-        if os.path.exists(IMPUTER_PATH):
+        num_cols = X_test.select_dtypes(include=[np.number]).columns
+        if os.path.exists(IMPUTER_PATH) and not num_cols.empty:
             imputer = joblib.load(IMPUTER_PATH)
-            num_cols = X_test.select_dtypes(include=[np.number]).columns
-            if not num_cols.empty:
-                X_test[num_cols] = imputer.transform(X_test[num_cols])
+            X_test[num_cols] = imputer.transform(X_test[num_cols])
 
-        if os.path.exists(SCALER_PATH):
+        if os.path.exists(SCALER_PATH) and not num_cols.empty:
             scaler = joblib.load(SCALER_PATH)
-            num_cols = X_test.select_dtypes(include=[np.number]).columns
-            if not num_cols.empty:
-                X_test[num_cols] = scaler.transform(X_test[num_cols])
+            X_test[num_cols] = scaler.transform(X_test[num_cols])
 
+        # Prediction ပြုလုပ်ခြင်း
         predictions = model.predict(X_test)
+        predictions = np.array(predictions, dtype=int)
+
         acc = accuracy_score(y_test, predictions)
-        test_report = classification_report(y_test, predictions)
-        
+
+        # 🎯 ၁။ Classification Report
+        labels = list(range(len(target_names)))
+        test_report = classification_report(y_test, predictions, labels=labels, target_names=target_names)
+
+        # 🎯 ၂။ Numeric Prediction များကို Original Target Class Names စာသားများသို့ ပြန်ပြောင်းခြင်း
+        if os.path.exists(TARGET_ENCODER_PATH):
+            target_le = joblib.load(TARGET_ENCODER_PATH)
+            pred_labels = [target_le.inverse_transform([p])[0] if p < len(target_le.classes_) else str(p) for p in predictions]
+        else:
+            pred_labels = predictions.tolist()
+
+        # 🎯 ၃။ Actual vs Predicted Comparison DataFrame တည်ဆောက်ခြင်း
+        df_comparison = pd.DataFrame({
+            'Row No.': range(1, len(y_test) + 1),
+            'Actual Weather': y_test_orig.values,
+            'Predicted Weather': pred_labels,
+                    })
+
+        # HTML Table အဖြစ် ပြောင်းလဲခြင်း
+        comparison_table = df_comparison.to_html(
+            classes='table table-striped table-hover table-bordered text-center', 
+            index=False
+        )
+
         return render_template(
             'training.html', 
             result=f"🎯 Test Accuracy Score: {acc * 100:.2f}%",
-            report=test_report
+            report=test_report,
+            comparison_table=comparison_table
         )
 
     except Exception as e:

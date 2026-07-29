@@ -131,11 +131,21 @@
 
 <!-- Classification Report Display -->
 {% if report %}
-    <hr>
+<div class="report-container" style="margin-top: 20px;">
     <h3>📊 Classification Report:</h3>
-    <pre style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 14px; border: 1px solid #ddd;">
+    <pre style="font-family: 'Courier New', Courier, monospace; white-space: pre; font-size: 15px; line-height: 1.5; background-color: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #ddd;">
 {{ report }}
     </pre>
+</div>
+{% endif %}
+
+{% if comparison_table %}
+<div class="comparison-container" style="margin-top: 30px;">
+    <h3>🔍 Actual vs Predicted Results Table:</h3>
+    <div style="max-height: 450px; overflow-y: auto; border: 1px solid #ccc; border-radius: 5px;">
+        {{ comparison_table | safe }}
+    </div>
+</div>
 {% endif %}
 </div>
 
